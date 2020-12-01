@@ -7,6 +7,7 @@ import io.rsocket.metadata.WellKnownMimeType;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.messaging.handler.annotation.MessageMapping;
 import org.springframework.messaging.rsocket.RSocketRequester;
 import org.springframework.messaging.rsocket.RSocketStrategies;
@@ -41,6 +42,9 @@ public class RSocketShellClient {
     private RSocketRequester.Builder rsocketRequesterBuilder;
     private RSocketStrategies rsocketStrategies;
 
+    @Value("${demo.server.port}")
+    private int serverPort;
+
     @Autowired
     public RSocketShellClient(RSocketRequester.Builder builder,
                               @Qualifier("rSocketStrategies") RSocketStrategies strategies) {
@@ -60,7 +64,7 @@ public class RSocketShellClient {
                 .rsocketStrategies(builder ->
                         builder.encoder(new SimpleAuthenticationEncoder()))
                 .rsocketConnector(connector -> connector.acceptor(responder))
-                .connectTcp("localhost", 7000)
+                .connectTcp("localhost", serverPort)
                 .block();
 
         this.rsocketRequester.rsocket()
