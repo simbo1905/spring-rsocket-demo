@@ -7,11 +7,11 @@ import reactor.core.publisher.Flux;
 import java.time.Duration;
 
 @Slf4j
-class ClientHandler {
+class PeerHandler {
 
-    @MessageMapping("client-status")
+    @MessageMapping("peer-status")
     public Flux<String> statusUpdate(String status) {
-        log.info("Connection {}", status);
+        log.info("Peer OPENED {}", status);
         return Flux.interval(Duration.ofSeconds(5)).map(index -> String.valueOf(Runtime.getRuntime().freeMemory()));
     }
 }

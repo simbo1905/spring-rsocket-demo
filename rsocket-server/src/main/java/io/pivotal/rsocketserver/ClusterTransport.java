@@ -15,10 +15,7 @@ import org.springframework.security.rsocket.metadata.UsernamePasswordMetadata;
 import org.springframework.stereotype.Controller;
 import org.springframework.util.MimeType;
 import org.springframework.util.MimeTypeUtils;
-import reactor.core.publisher.Mono;
-import reactor.util.retry.Retry;
 
-import java.time.Duration;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.BlockingQueue;
@@ -84,10 +81,10 @@ public class ClusterTransport {
 
     private void reconnect() {
         if( this.rsocketRequester == null ){
-            SocketAcceptor responder = RSocketMessageHandler.responder(rsocketStrategies, new ClientHandler());
+            SocketAcceptor responder = RSocketMessageHandler.responder(rsocketStrategies, new PeerHandler());
             UsernamePasswordMetadata user = new UsernamePasswordMetadata("user", "pass");
             this.rsocketRequester = rsocketRequesterBuilder
-                    .setupRoute("shell-client")
+                    .setupRoute("peer-client")
                     .setupData(CLIENT_ID)
                     .setupMetadata(user, SIMPLE_AUTH)
                     .rsocketStrategies(builder ->
@@ -98,8 +95,8 @@ public class ClusterTransport {
 
             this.rsocketRequester.rsocket()
                     .onClose()
-                    .doOnError(error -> log.warn("Peer Connection CLOSED"))
-                    .doFinally(consumer -> log.info("Peer` DISCONNECTED"))
+                    .doOnError(error -> log.warn("Peer outbound CLOSED"))
+                    .doFinally(consumer -> log.info("Peer outbound DISCONNECTED"))
                     .subscribe();
         }
     }
@@ -108,14 +105,6 @@ public class ClusterTransport {
     ReplicationNexus<Message> replicationNexus;
 
     private void process(final String uuid) {
-//        Mono<String> x = this.requesterMono.flatMap(requester -> {
-//
-//            return requester.route("pong")
-//                    .data(uuid)
-//                    .retrieveMono(String.class);
-//        });
-//        x.subscribe(uuid2 ->
-//                    replicationNexus.complete(uuid2, new Message(SERVER, RESPONSE)));
         String response = this.rsocketRequester
                 .route("pong")
                 .data(uuid)

@@ -50,6 +50,36 @@ public class RSocketController {
         log.info("Shutting down.");
     }
 
+    @ConnectMapping("peer-client")
+    void connectPeerClientAndAskForTelemetry(RSocketRequester requester,
+                                             @Payload String client) {
+
+        requester.rsocket()
+                .onClose()
+                .doFirst(() -> {
+                    // Add all new clients to a client list
+                    log.info("Peer: {} CONNECTED.", client);
+                    CLIENTS.add(requester);
+                })
+                .doOnError(error -> {
+                    // Warn when channels are closed by clients
+                    log.warn("Peer {} CLOSED", client);
+                })
+                .doFinally(consumer -> {
+                    // Remove disconnected clients from the client list
+                    CLIENTS.remove(requester);
+                    log.info("Peer {} DISCONNECTED", client);
+                })
+                .subscribe();
+
+        // Callback to client, confirming connection
+        requester.route("peer-status")
+                .data("OPEN")
+                .retrieveFlux(String.class)
+                .doOnNext(s -> log.info("Peer: {} Free Memory: {}.", client, s))
+                .subscribe();
+    }
+
     @ConnectMapping("shell-client")
     void connectShellClientAndAskForTelemetry(RSocketRequester requester,
                                               @Payload String client) {
@@ -104,7 +134,6 @@ public class RSocketController {
         String uuid = UUID.randomUUID().toString();
         Mono<Message> deferred = Mono.create(sink -> replicationNexus.registerRequest(uuid ,sink));
 
-        // FIXME
         clusterTransport.messageQueue.put(Optional.ofNullable(uuid));
 
         // return the deferred work that will be completed by the pong response
