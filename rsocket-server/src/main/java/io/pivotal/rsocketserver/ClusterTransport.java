@@ -22,6 +22,7 @@ import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.LinkedBlockingDeque;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import static io.pivotal.rsocketserver.RSocketController.RESPONSE;
 import static io.pivotal.rsocketserver.RSocketController.SERVER;
@@ -29,16 +30,11 @@ import static io.pivotal.rsocketserver.RSocketController.SERVER;
 @Slf4j
 @Controller
 public class ClusterTransport {
-
     private static final String CLIENT_ID = UUID.randomUUID().toString();
     private static final MimeType SIMPLE_AUTH = MimeTypeUtils.parseMimeType(WellKnownMimeType.MESSAGE_RSOCKET_AUTHENTICATION.getString());
 
-
     @Value("${demo.other.port}")
     private int otherPort;
-
-    //private final Mono<RSocketRequester> requesterMono;
-
     private RSocketRequester rsocketRequester;
     private RSocketRequester.Builder rsocketRequesterBuilder;
     private RSocketStrategies rsocketStrategies;
@@ -61,7 +57,8 @@ public class ClusterTransport {
             do{
                 try {
                     v = messageQueue.take();
-                    reconnect();
+                    if( requiresReconnect.get() )
+                        reconnect();
                 } catch (InterruptedException e) {
                     log.warn("thread interrupted so shutting down executor thread");
                     v = Optional.empty();
@@ -71,34 +68,36 @@ public class ClusterTransport {
             } while( v.isPresent() );
         } );
 
-//        this.requesterMono = builder.rsocketConnector(connector -> connector
-//                .reconnect(Retry.fixedDelay(Integer.MAX_VALUE, Duration.ofSeconds(1))))
-//                .connectTcp("localhost", otherPort);
-
         this.rsocketRequesterBuilder = builder;
         this.rsocketStrategies = strategies;
     }
 
-    private void reconnect() {
-        if( this.rsocketRequester == null ){
-            SocketAcceptor responder = RSocketMessageHandler.responder(rsocketStrategies, new PeerHandler());
-            UsernamePasswordMetadata user = new UsernamePasswordMetadata("user", "pass");
-            this.rsocketRequester = rsocketRequesterBuilder
-                    .setupRoute("peer-client")
-                    .setupData(CLIENT_ID)
-                    .setupMetadata(user, SIMPLE_AUTH)
-                    .rsocketStrategies(builder ->
-                            builder.encoder(new SimpleAuthenticationEncoder()))
-                    .rsocketConnector(connector -> connector.acceptor(responder))
-                    .connectTcp("localhost", otherPort)
-                    .block();
+    private AtomicBoolean requiresReconnect = new AtomicBoolean(true);
 
-            this.rsocketRequester.rsocket()
-                    .onClose()
-                    .doOnError(error -> log.warn("Peer outbound CLOSED"))
-                    .doFinally(consumer -> log.info("Peer outbound DISCONNECTED"))
-                    .subscribe();
-        }
+    private void reconnect() {
+        SocketAcceptor responder = RSocketMessageHandler.responder(rsocketStrategies, new PeerHandler());
+        UsernamePasswordMetadata user = new UsernamePasswordMetadata("user", "pass");
+        this.rsocketRequester = rsocketRequesterBuilder
+                .setupRoute("peer-client")
+                .setupData(CLIENT_ID)
+                .setupMetadata(user, SIMPLE_AUTH)
+                .rsocketStrategies(builder ->
+                        builder.encoder(new SimpleAuthenticationEncoder()))
+                .rsocketConnector(connector -> {
+                    connector.acceptor(responder);
+                })
+                .connectTcp("localhost", otherPort)
+                .block();
+
+        this.rsocketRequester.rsocket()
+                .onClose()
+                .doOnError(error -> log.warn("Peer outbound CLOSED"))
+                .doFinally(consumer -> {
+                    log.info("Peer outbound DISCONNECTED");
+                    requiresReconnect.set(true);
+                })
+                .subscribe();
+        requiresReconnect.set(false);
     }
 
     @Autowired
