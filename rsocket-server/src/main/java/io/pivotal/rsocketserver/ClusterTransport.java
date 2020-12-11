@@ -39,7 +39,6 @@ public class ClusterTransport {
     private RSocketRequester.Builder rsocketRequesterBuilder;
     private RSocketStrategies rsocketStrategies;
 
-    // FIXME make this elastic
     ExecutorService executor = Executors.newSingleThreadExecutor();
 
     /**
@@ -51,30 +50,34 @@ public class ClusterTransport {
             RSocketRequester.Builder builder,
             @Qualifier("rSocketStrategies")
                     RSocketStrategies strategies) {
+        this.rsocketRequesterBuilder = builder;
+        this.rsocketStrategies = strategies;
 
         executor.submit(()-> {
             Optional<String> v;
             do{
                 try {
                     v = messageQueue.take();
-                    if( requiresReconnect.get() )
-                        reconnect();
+                    reconnect();
                 } catch (InterruptedException e) {
-                    log.warn("thread interrupted so shutting down executor thread");
+                    log.warn("thread interrupted");
                     v = Optional.empty();
-                    executor.shutdownNow();
                 }
                 v.stream().forEach(m->process(m));
             } while( v.isPresent() );
+            executor.shutdownNow();
         } );
-
-        this.rsocketRequesterBuilder = builder;
-        this.rsocketStrategies = strategies;
     }
 
     private AtomicBoolean requiresReconnect = new AtomicBoolean(true);
 
-    private void reconnect() {
+    private synchronized void reconnect() {
+        if( requiresReconnect.get() == false ){
+            return;
+        }
+        if( this.rsocketRequester != null ){
+            this.rsocketRequester.rsocket().dispose();
+        }
         SocketAcceptor responder = RSocketMessageHandler.responder(rsocketStrategies, new PeerHandler());
         UsernamePasswordMetadata user = new UsernamePasswordMetadata("user", "pass");
         this.rsocketRequester = rsocketRequesterBuilder
