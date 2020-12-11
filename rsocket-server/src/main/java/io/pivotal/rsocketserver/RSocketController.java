@@ -1,35 +1,24 @@
 package io.pivotal.rsocketserver;
 
 import io.pivotal.rsocketserver.data.Message;
-import io.rsocket.SocketAcceptor;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.beans.factory.annotation.Qualifier;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.http.MediaType;
 import org.springframework.messaging.handler.annotation.MessageMapping;
 import org.springframework.messaging.handler.annotation.Payload;
 import org.springframework.messaging.rsocket.RSocketRequester;
-import org.springframework.messaging.rsocket.RSocketStrategies;
 import org.springframework.messaging.rsocket.annotation.ConnectMapping;
-import org.springframework.messaging.rsocket.annotation.support.RSocketMessageHandler;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.core.userdetails.UserDetails;
-import org.springframework.security.rsocket.metadata.SimpleAuthenticationEncoder;
 import org.springframework.stereotype.Controller;
-import reactor.core.Disposable;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
-import reactor.core.scheduler.Schedulers;
-import reactor.util.retry.Retry;
 
 import javax.annotation.PreDestroy;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Optional;
 import java.util.UUID;
 
 @Slf4j
@@ -45,7 +34,7 @@ public class RSocketController {
 
     @PreDestroy
     void shutdown() {
-        log.info("Detaching all remaining clients...");
+            log.info("Detaching all remaining clients...");
         CLIENTS.stream().forEach(requester -> requester.rsocket().dispose());
         log.info("Shutting down.");
     }
@@ -129,15 +118,23 @@ public class RSocketController {
     Mono<Message> requestResponse(final Message request, @AuthenticationPrincipal UserDetails user) {
         log.info("Received request-response request: {}", request);
         log.info("Request-response initiated by '{}' in the role '{}'", user.getUsername(), user.getAuthorities());
-
-        // register a mono that will be completed on a different messageMapping without bocking
-        String uuid = UUID.randomUUID().toString();
-        Mono<Message> deferred = Mono.create(sink -> replicationNexus.registerRequest(uuid ,sink));
-
-        clusterTransport.messageQueue.put(Optional.ofNullable(uuid));
-
-        // return the deferred work that will be completed by the pong response
-        return deferred;
+        return clusterTransport.getRSocketRequesterMono().flatMap( rSocketRequester -> {
+            Mono<Message> x = rSocketRequester
+                    .route("peer-client")
+                    .data(ClusterTransport.CLIENT_ID)
+                    .retrieveMono(String.class)
+                    .doOnSubscribe(s->{
+                        log.info("peer subscribe");
+                    })
+                    .doOnSuccess(s->{
+                        log.error("peer error");
+                    })
+                    .doOnError(s->{
+                        log.error("peer error", s);
+                    })
+                    .map(s->new Message(SERVER, RESPONSE));
+            return x;
+        });
     }
 
     @MessageMapping("pong")
